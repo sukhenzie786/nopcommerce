@@ -1,0 +1,171 @@
+---
+- name: Install Apache and Nop
+  hosts: all
+  become: yes  
+  tasks:
+  - name: download the debian file
+    get_url:
+      url: https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb
+      dest: /tmp/packages-microsoft-prod.deb
+  - name: install the debian package
+    apt:
+      deb: /tmp/packages-microsoft-prod.deb
+  - name: install .net core runtimes
+    apt:
+      name: "{{ item }}"
+      update_cache: yes
+      state: present
+    with_items:
+     - apt-transport-https 
+     - aspnetcore-runtime-3.1
+  - name: Make sure HTTPS is supported by apt
+    apt:
+      name: apt-transport-https
+      state: present
+      update_cache: no
+    become: true
+  - name: Run the equivalent of "apt-get update" as a separate step
+    apt:
+      update_cache: yes
+  - name: Install .NET Core SDK
+    apt:
+      name: dotnet-sdk-6.0
+      state: present
+      update_cache: yes
+    become: true
+ 
+  - name: Install apache
+    apt: name=apache2 state=present
+
+  - name: Install apache auth modules
+    apt: name={{ item }} state=present
+    with_items:
+    - libapache2-mod-jk
+    - libapache2-mod-proxy-uwsgi
+    - libapache2-mod-proxy-msrpc
+    notify: apache2 restart
+
+  - name: Disable default virtualhost
+    file: path=/etc/apache2/sites-enabled/000-default.conf state=absent
+    notify: apache2 restart
+
+  - name: Enable proxy related modules
+    apache2_module: name={{ item }} state=present
+    with_items:
+    - alias
+    - ratelimit
+    - rewrite
+    - headers
+    - proxy_ajp
+    - proxy_balancer
+    - proxy_connect
+    - proxy_express
+    - proxy_ftp
+    - proxy_html
+    - proxy_http
+    - proxy_scgi
+    - proxy_wstunnel
+    - ssl
+    - vhost_alias
+    - xml2enc
+    notify: apache2 restart
+
+  - name: Enable auth related modules
+    apache2_module: name={{ item }} state=present
+    with_items:
+    - auth_digest
+    - authnz_ldap
+    - ldap
+    notify: apache2 restart
+
+  - name: Enable cache related modules
+    apache2_module: name={{ item }} state=present
+    with_items:
+    - cache_disk
+    - cache
+    - file_cache
+    notify: apache2 restart     
+    
+  - name: create nop.conf
+    template:
+      src: /home/ansible/nop/virtualhost.conf
+      dest: /etc/apache2/sites-available/nop.conf
+      
+  - name: enable a2ensite
+    command: a2ensite nop
+    args:
+      creates: /etc/apache2/sites-enabled/nop.conf
+    notify:
+      -  apache2 restart
+  
+  - name: Create a directory if it does not exist
+    ansible.builtin.file:
+      path: /var/www/nopCommerce450
+      state: directory
+      mode: '0755'     
+
+  - name: download the debian file
+    get_url:
+      url: https://github.com/nopSolutions/nopCommerce/releases/download/release-4.50.2/nopCommerce_4.50.2_NoSource_linux_x64.zip
+      dest: /var/www/nopCommerce450/nopCommerce_4.50.2_NoSource_linux_x64.zip
+  - name: install unzip
+    apt: 
+      name: unzip
+      update_cache: yes
+      state: present  
+  
+  - name: Unarchive a file that is already on the remote machine
+    ansible.builtin.unarchive:
+      src: /var/www/nopCommerce450/nopCommerce_4.50.2_NoSource_linux_x64.zip
+      dest: /var/www/nopCommerce450/
+      remote_src: yes
+
+  - name: Create a directory if it does not exist
+    ansible.builtin.file:
+      path: /var/www/nopCommerce450/bin
+      state: directory
+      mode: '0755'
+
+  - name: Create a directory if it does not exist
+    ansible.builtin.file:
+      path: /var/www/nopCommerce450/logs
+      state: directory
+      mode: '0755'
+
+  - name: Recursively change ownership of a directory
+    ansible.builtin.file:
+      path: /var/www/nopCommerce450/
+      state: directory
+      recurse: yes
+      owner: www-data
+      group: www-data    
+  
+  - name: create nopCommerce450.service
+    template:
+      src: /home/ansible/nop/nopCommerce450.service
+      dest: /etc/systemd/system/nopCommerce450.service
+  
+  - name: Start service nopCommerce450.service, if not started
+    ansible.builtin.service:
+      name: nopCommerce450.service
+      state: started
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    apt:
+      update_cache: yes
+
+  - name: Install mysql-shell
+    apt:
+      name: mysql-server
+      state: present
+      update_cache: yes
+    become: yes       
+
+  handlers:              
+  - name: apache2 restart
+    service:
+      name: apache2
+      enabled: yes
+      state: restarted             
+
+      
